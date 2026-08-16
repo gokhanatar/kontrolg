@@ -1,0 +1,263 @@
+# Audit Rules — Concrete Detection Patterns
+
+This file covers *how to look*. Commands assume `ripgrep` (`rg`); fall back to `grep -rn`. Always exclude `node_modules`, `dist`, `build`, `.git`.
+
+---
+
+## Verification protocol (read before scanning)
+
+The patterns below produce *suspicion*, not *findings*. Field data shows that close to half of first-pass grep hits evaporate once you open the file. The two most common ways they evaporate:
+
+- **A narrow search mistaken for proof of absence.** "No Sentry → no error tracking." The project may do the same job with a module it wrote itself. Before claiming something is *missing*, search for the **generic** names of that capability too, then open the place it would live (entry file, global handler, root layout) and look.
+- **Assuming the tool's output.** Believing `.env` is tracked, or that migrations do not exist, without reading what the command actually printed.
+
+**Rule:** every suspicion gets at least one *confirming* step — a second, broader search, or opening the file and reading it. An unconfirmed suspicion does not go in the report. If it does, the credibility of the entire report drops, because a user who sees the first item proven wrong will disbelieve the correct ones too.
+
+**Withdrawing a false finding is a success, not a defect.** If it turns out to be wrong after you wrote it, withdraw it explicitly and say why. In particular: even when the user says "install X", verify it is genuinely missing before installing. Stacking a second dependency on a system that already works is a net loss.
+
+---
+
+## 1. Secret and credential leakage
+
+```bash
+rg -n --hidden -g '!.git' -g '!node_modules' \
+  -e 'sk-[a-zA-Z0-9]{20,}' -e 'AIza[0-9A-Za-z_-]{30,}' \
+  -e 'SERVICE_ROLE' -e 'service_role' \
+  -e 'BEGIN (RSA|PRIVATE) KEY' \
+  -e 'password\s*[:=]\s*["'"'"']' -e 'secret\s*[:=]\s*["'"'"']'
+git ls-files | rg -e '\.env$' -e '\.env\.(local|prod|production)'
+cat .gitignore 2>/dev/null | rg -e 'env'
+git log --oneline --all -- .env 2>/dev/null | head
+```
+
+**Confirming step:** `.env` appearing in `git ls-files` is not enough on its own — harmless files like `.env.example`, `.env.template`, `.env.d.ts` match too. Check the exact filename and open it to see whether it holds real values:
+
+```bash
+git ls-files | grep -E '(^|/)\.env($|\.)' | while read f; do echo "== $f"; head -3 "$f"; done
+```
+
+If the values are empty or placeholders like `<your-key>`, there is no finding.
+
+Check:
+- Is `.env` tracked now — and was it ever tracked historically?
+- Does `.env.example` exist? If not, create it (with empty values).
+- Variables that reach the client bundle: **anything** prefixed `VITE_`, `NEXT_PUBLIC_`, `EXPO_PUBLIC_` is public. A service-role key, admin key, or payment secret behind one of those prefixes is P0 on its own.
+- Mobile: keys embedded in native code or the JS bundle. A Capacitor bundle inside `dist/` is plainly readable.
+
+On a leak: report the location, mask the value, and **have the user rotate the key**. Suggest `git filter-repo` or BFG to purge history, but do not run it automatically.
+
+---
+
+## 2. Authorization — BOLA/IDOR, RLS, tenant isolation
+
+The most common real vulnerability in APIs. Treat it seriously.
+
+### Supabase / Postgres RLS
+```bash
+rg -n 'create table' -i supabase/migrations/ 2>/dev/null
+rg -n 'enable row level security|create policy' -i supabase/migrations/ 2>/dev/null
+```
+For every table holding user data: is RLS enabled **and** is there at least one policy? RLS on with no policy means the table is fully closed (a broken feature). RLS off with an anon key means the whole table is public (critical).
+
+Flag policies containing `using (true)` or `to public` separately — they are usually written by accident.
+
+### Ownership checks in code
+```bash
+rg -n 'params\.id|req\.params|searchParams\.get\(.id' --type ts --type js
+rg -n "\.eq\('id'," --type ts --type js
+```
+For every route that fetches a record by ID, ask: "what happens if I put someone else's ID here?" If the query has no `user_id`/`owner_id`/`tenant_id` filter and RLS does not guarantee it, that is a BOLA finding.
+
+### Where authorization actually happens
+```bash
+rg -n 'isAdmin|role\s*===|hasPermission|requireAuth|getUser\(\)' --type ts --type js
+```
+Authorization performed only in the UI (hiding a button) is not authorization. Look for a server- or database-side counterpart.
+
+### Mass assignment
+```bash
+rg -n '\.\.\.(req\.body|body|payload|data)\b' --type ts --type js
+```
+Spreading the whole request body into an insert or update lets a user send `role: "admin"`. Check for a whitelist or schema validation.
+
+---
+
+## 3. Injection and input validation
+
+```bash
+rg -n 'query\(`|execute\(`|raw\(`|\$\{.*\}.*(FROM|WHERE|INSERT|UPDATE|DELETE)' -i
+rg -n 'dangerouslySetInnerHTML|innerHTML\s*=|eval\(|new Function\('
+rg -n 'exec\(|execSync\(|spawn\(' --type ts --type js
+```
+- SQL built from a template literal containing user input → convert to a parameterized query.
+- Is there a validation layer: `zod`, `joi`, `yup`, `valibot`, `class-validator`? If none exists and public endpoints do, that is P0/P1.
+- File uploads: size limit, MIME/extension whitelist, and never placing the raw filename into a path.
+
+---
+
+## 4. Data layer
+
+```bash
+ls supabase/migrations prisma/migrations drizzle migrations 2>/dev/null
+rg -n 'select\(.\*.\)|SELECT \*' -i
+rg -n 'for\s*\(|\.map\(|forEach' -A3 | rg -n 'await'   # N+1 suspicion
+rg -n 'float|double precision|REAL' -i --glob '*.sql'   # money type
+rg -n 'new Date\(\)|Date\.now\(\)|toLocaleDateString' --type ts --type js
+```
+
+- **Migration discipline**: no migrations folder? Then where does the schema live? If it is edited by hand, that is P0 — environments will drift apart.
+- **Indexes**: are foreign keys and columns used in `where`/`order by`/`join` indexed? Does the column order of a composite index match the query? Postgres does **not** index foreign keys automatically.
+- **N+1**: an awaited query inside a loop → collapse into one query (`in`, join, or batch).
+- **Unbounded queries**: list queries with no `limit`/`range`. This is the first thing to break as tables grow.
+- **Pagination**: if offset pagination is used and the list will grow, propose cursor/keyset.
+- **Money**: stored as a float → switch to integer minor units (cents) or `numeric`. Irreversible decision, so P0.
+- **Dates**: stored in UTC, with zone information? Use `timestamptz` rather than `timestamp`.
+- **Transactions**: are related writes wrapped in a single transaction (payment + record + balance)?
+- **Soft delete / audit**: warn if user data is deleted irrecoverably while the business needs undo.
+- **ID type**: sequential auto-increment IDs in a public API leak both predictability and business volume. Suggest UUIDv7/ULID (irreversible decision).
+
+---
+
+## 5. Idempotency and consistency
+
+```bash
+rg -n 'webhook|stripe|constructEvent|signature' -i
+rg -n 'idempotenc' -i
+rg -n 'retry|backoff' -i
+```
+- Does the webhook endpoint verify the signature? If not, anyone can forge a "payment succeeded" event → P0.
+- What happens if a webhook, payment, or record-creation path receives the same request twice? Is there an idempotency key or a unique constraint?
+- If retries exist, is the receiver idempotent (the mandatory partner of at-least-once delivery)?
+- Is long-running work (reports, email, AI calls, video) running inside the HTTP request? It belongs in a queue or background job.
+
+---
+
+## 6. Startup and performance
+
+Read `performance-audit.md` in full before scanning this category. Never write a performance finding without a measured number.
+
+---
+
+## 7. Error handling and observability
+
+```bash
+rg -n 'catch\s*\(\s*\w*\s*\)\s*\{\s*\}' -U          # swallowed errors
+rg -n 'console\.(log|error)' src/ | wc -l
+rg -n 'Sentry|Crashlytics|Bugsnag|captureException' -i
+# IMPORTANT: the search above only finds off-the-shelf SDKs. A hand-rolled error
+# system is invisible to it. Run this BEFORE claiming "no error tracking":
+rg -n 'errorReporter|reportError|logError|trackError|onerror|unhandledrejection|window\.addEventListener\(.error' -i
+rg -n 'ErrorBoundary'
+rg -n 'fetch\(' --type ts --type js | head -30       # any timeouts?
+```
+- Silently swallowed `catch` blocks → at minimum, log them.
+- No error tracking in production means the user experiences the bug and you never learn about it. Even on a small project this is P1.
+- Without an ErrorBoundary in React, a single component error is a white screen.
+- `fetch` calls with no timeout/AbortSignal can hang forever.
+- Are emails, phone numbers, or tokens being written to logs? That is a privacy problem too.
+- Is there a correlation/request ID (if there is a backend)?
+
+---
+
+## 8. Async, cancellation, resource leaks
+
+```bash
+rg -n 'useEffect' -A8 | rg -n 'fetch|subscribe|setInterval|addEventListener'
+rg -n 'AbortController|AbortSignal|cancel'
+rg -n 'setInterval|setTimeout' -A5 | rg -n 'clear'
+```
+- Are fetches, subscriptions, and intervals started inside `useEffect` cancelled on cleanup?
+- Are realtime/WebSocket subscriptions closed on unmount (a frequent leak with Supabase Realtime and Firestore)?
+- Are rapidly repeated searches debounced, and can a late response from an old request overwrite a newer one (race condition)?
+- Is there a cap on concurrent requests, especially for paid APIs?
+
+---
+
+## 9. API surface
+
+- Rate limits, especially on `login`, `register`, `forgot-password`, OTP, and expensive AI endpoints. Without them you get brute force and runaway bills.
+- Is the error format consistent? Are stack traces or SQL errors reaching the client (information disclosure)?
+- Is CORS set to `*`, and is it combined with credentialed requests?
+- Security headers (CSP, HSTS, X-Content-Type-Options) on the web.
+- Is the pagination limit capped (is `?limit=100000` rejected)?
+
+---
+
+## 10. Configuration and deploy hygiene
+
+```bash
+ls .github/workflows .gitlab-ci.yml 2>/dev/null
+rg -n 'localhost|127\.0\.0\.1|http://' src/ --type ts --type js
+cat .nvmrc .node-version 2>/dev/null; rg -n '"engines"' package.json
+```
+- Are environments separated (distinct dev/prod databases and keys)? Sharing one database is P0.
+- Have hardcoded URLs or `localhost` leaked into production code?
+- Is the build in production mode, and are source maps being published?
+- No CI? Propose a minimal pipeline that at least runs build and lint.
+- Is the lockfile committed?
+
+---
+
+## 11. Store and regulatory compliance (mobile / user data)
+
+- Is there an account deletion flow? **Mandatory** for App Store and Play for any app that creates accounts. Its absence is a rejection reason.
+- Are the privacy policy and terms reachable from inside the app?
+- Does the Play Data Safety / App Privacy form match what the code actually collects? An analytics SDK may be collecting quietly.
+- Are permission prompts justified and requested at the right moment (not all at launch)?
+- Is iOS ATT required (any advertising or tracking)?
+- GDPR/CCPA: retention period, deletion request flow, data minimization, possibility of minors (COPPA / age gate).
+- With an ad SDK: correct configuration for child-directed content.
+
+---
+
+## 12. Comment–code mismatch
+
+The single highest-yield pattern in the scan. When a comment claims a safeguard *exists*, verify the safeguard is actually in the code. Comments like "limit added", "authorization checked", "sanitized", "cached", or "rate limited" survive the refactors that delete the code itself — and mislead every future reader, including you.
+
+```bash
+rg -n -i 'limit|sanitiz|validat|auth|secure|cache|check|fix|TODO|FIXME|HACK|temporary' \
+  -g '*.ts' -g '*.tsx' -g '*.js' -g '*.jsx' | rg '//|/\*|#'
+```
+
+For each matching comment, read the 5–10 lines beneath it: is the thing the comment describes actually there? If not, that is a finding and usually a P0, because nobody suspects that spot. Surface `TODO`/`FIXME`/`temporary` tags on security or limit comments separately.
+
+The same logic applies to: a security setting defined in config but never used, a validation function written but never called, a rate-limit constant defined but never enforced.
+
+**The reverse case counts too.** A comment may *overstate* severity — a `CRITICAL` tag on something that turns out to be a revenue leak rather than a vulnerability. Reprioritize based on what the code does, not what the comment claims.
+
+---
+
+## 13. Firebase / Firestore
+
+The Postgres/Supabase sections do not apply here. Firebase's critical points are different:
+
+```bash
+cat firestore.rules storage.rules 2>/dev/null
+cat firestore.indexes.json 2>/dev/null
+rg -n 'onSnapshot|collection\(|query\(' --type ts --type js
+rg -n 'limit\(|orderBy\(|startAfter\(' --type ts --type js
+```
+
+- **Security rules are the only line of defense.** The client talks to the database directly; `allow read, write: if true` or `if request.auth != null` (everything to any signed-in user) is a common and critical mistake. Rules must check the record's owner or tenant.
+- **Rules vs. code alignment:** do the rules validate the fields the code writes (`request.resource.data` checks)? Without them a user writes whatever field they like — Firestore's version of mass assignment.
+- **Unbounded `onSnapshot`**: a realtime listener without `limit()` inflates both the read bill and client memory as the collection grows. In Firestore, cost is a function of **documents read**, which makes an unbounded query far more expensive here than in Postgres. Chat, notification, log, and activity-feed collections are the riskiest.
+- **Listener cleanup**: is the value returned by `onSnapshot` (the unsubscribe function) called in the `useEffect` cleanup? If not, you get both a leak and a recurring bill.
+- **Composite indexes**: are the `where` + `orderBy` combinations declared in `firestore.indexes.json`? If not, the query fails in production.
+- **Denormalization cost**: counters and totals computed on every read should live in a field maintained with `increment()`.
+- **Storage rules**: are file size and content-type constrained? Without them anyone uploads anything, without limit.
+- **Quota blowout**: is there a budget alarm (App Check + budget alert)?
+
+---
+
+## Over-engineering filter
+
+Do **not** propose the following without evidence of need:
+- Kubernetes, service mesh, microservices (solo developer or <10k users)
+- CQRS, event sourcing, sagas (no distributed transactions)
+- Sharding, read replicas (no measured single-database bottleneck)
+- Distributed tracing (single service)
+- A hand-rolled auth system (when a provider is available)
+- GraphQL (single client, simple data model)
+- Redis (no measured caching need)
+
+If one of these is already present and unnecessary, note it in the report as a "simplification opportunity" — but never remove it automatically.
