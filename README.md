@@ -1,6 +1,8 @@
 # kontrolg
 
-**An autonomous audit pass for Claude Code.** Type `/kontrolg` in any project and it scans the codebase, decides for itself what actually matters, writes a prioritized report with file-and-line evidence, and — once you approve — fixes it.
+**Autonomous pre-ship checks for Claude Code.** Two skills that read your codebase and tell you what will actually bite you: `kontrolg` for a technical audit, `store-preflight` for App Store and Play rejection risk.
+
+**`/kontrolg` — an autonomous audit pass.** Type `/kontrolg` in any project and it scans the codebase, decides for itself what actually matters, writes a prioritized report with file-and-line evidence, and — once you approve — fixes it.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-skill-8A63D2.svg)](https://docs.claude.com/en/docs/claude-code/skills)
@@ -26,14 +28,14 @@ git clone https://github.com/gokhanatar/kontrolg.git
 cd kontrolg && ./install.sh
 ```
 
-That copies the skill to `~/.claude/skills/kontrolg/` and the slash command to `~/.claude/commands/kontrolg.md` — both global, so they work in every project. Open a new Claude Code session and you're done.
+That copies both skills to `~/.claude/skills/` and both slash commands to `~/.claude/commands/` — global, so they work in every project. Open a new Claude Code session and you're done.
 
 Prefer to do it by hand:
 
 ```bash
 mkdir -p ~/.claude/skills ~/.claude/commands
-cp -r skills/kontrolg ~/.claude/skills/
-cp commands/kontrolg.md ~/.claude/commands/
+cp -r skills/* ~/.claude/skills/
+cp commands/* ~/.claude/commands/
 ```
 
 **Project-scoped instead of global?** Copy into `.claude/skills/` and `.claude/commands/` inside the repo and commit them, so your whole team gets it.
@@ -43,9 +45,12 @@ cp commands/kontrolg.md ~/.claude/commands/
 ## Use
 
 ```
-/kontrolg                 # full pass
+/kontrolg                 # full audit pass
 /kontrolg security        # one category
 /kontrolg performance
+
+/store-preflight          # submission readiness check
+/store-preflight ios      # one platform
 ```
 
 Or just say it in plain language — *"audit this project"*, *"is this production ready?"*, *"find and fix the gaps"* — and the skill triggers on its own.
@@ -138,6 +143,23 @@ The same pass shrank an eagerly-bundled 17-language i18n import from **489 KB to
 
 ---
 
+## store-preflight
+
+A rejection costs one to three days, and almost all of them come from the same short list of causes — most of which are visible in the repo before you ever hit submit. `/store-preflight` answers one question: **would a reviewer reject this build, and why?**
+
+It separates hard blockers from reviewer-dependent risk, because marking everything critical trains you to ignore the report. What it looks for:
+
+- **Account deletion** — required by both stores for any app with accounts, and the single highest-frequency blocker. A string match isn't enough; the flow has to be reachable, delete server-side data, and not just open an email composer.
+- **Declarations vs. code** — the most common silent failure is an App Privacy or Data Safety form that doesn't match what an analytics or ads SDK actually collects. The code is the source of truth; the form is what gets you rejected.
+- **iOS privacy manifest** and required-reason APIs — validated at upload, so a gap here fails before a human ever looks at the build.
+- **Permissions** — declared-but-unused (common when a plugin injects them), used-but-undeclared, and purpose strings too generic to pass 5.1.1.
+- **Minimum functionality** — the real 4.2 risk for Capacitor and wrapper apps. If everything works identically in mobile Safari, the reviewer asks why it's an app.
+- Payments and IAP rules, UGC requirements (report, block, contact, EULA), target API levels, listing gaps, families policy, encryption compliance.
+
+It won't fill in a compliance form for you, and it won't help make a non-compliant app *look* compliant — if the app violates a policy, it says so plainly.
+
+---
+
 ## Design notes
 
 **Why the skill is allowed to be wrong out loud.** The verification protocol in [`audit-rules.md`](skills/kontrolg/references/audit-rules.md) exists because an early version claimed a project had no error tracking, based on a grep for `Sentry|captureException`. The project had a complete hand-rolled error reporter. The skill now treats *withdrawing a false finding as a success*, and refuses to install something the user asked for until it has verified it's actually missing.
@@ -151,13 +173,18 @@ The same pass shrank an eagerly-bundled 17-language i18n import from **489 KB to
 ## Repo layout
 
 ```
-skills/kontrolg/
-  SKILL.md                        the 5-phase flow and core principles
-  references/
-    audit-rules.md                13 categories of concrete grep patterns
-    performance-audit.md          measurement protocol + budget table
-    concept-checklist.md          ~350 concepts + symptom→concept map
-commands/kontrolg.md              the /kontrolg slash command
+skills/
+  kontrolg/
+    SKILL.md                      the 5-phase flow and core principles
+    references/
+      audit-rules.md              13 categories of concrete grep patterns
+      performance-audit.md        measurement protocol + budget table
+      concept-checklist.md        ~350 concepts + symptom→concept map
+  store-preflight/
+    SKILL.md                      submission readiness flow
+    references/
+      store-rules.md              per-platform policy detection patterns
+commands/                         the slash commands
 install.sh
 ```
 
@@ -168,6 +195,8 @@ The references load only when the relevant phase needs them, so a session that n
 ## Contributing
 
 The detection rules are tuned against React / Vite / Capacitor / Supabase / Firebase, because that's what they were built and field-tested on. **Rules for other stacks are the most valuable thing you can contribute** — Django, Rails, Go, .NET, Next.js server actions, React Native, Flutter.
+
+Store policies move, and `store-preflight` deliberately points at official pages instead of hardcoding thresholds. If you spot a rule that has changed, that is a valuable issue.
 
 False positives are the second most valuable. If a pattern fires on correct code, open an issue with the snippet; narrowing a rule improves the whole tool. See [CONTRIBUTING.md](CONTRIBUTING.md).
 

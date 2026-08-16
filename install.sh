@@ -3,7 +3,7 @@
 set -e
 
 SRC="$(cd "$(dirname "$0")" && pwd)"
-SKILL_DIR="$HOME/.claude/skills/kontrolg"
+SKILL_DIR="$HOME/.claude/skills"
 CMD_DIR="$HOME/.claude/commands"
 
 if [ ! -f "$SRC/skills/kontrolg/SKILL.md" ]; then
@@ -11,13 +11,13 @@ if [ ! -f "$SRC/skills/kontrolg/SKILL.md" ]; then
   exit 1
 fi
 
-mkdir -p "$SKILL_DIR/references" "$CMD_DIR"
-cp "$SRC/skills/kontrolg/SKILL.md" "$SKILL_DIR/"
-cp "$SRC/skills/kontrolg/references/"*.md "$SKILL_DIR/references/"
-cp "$SRC/commands/kontrolg.md" "$CMD_DIR/kontrolg.md"
+mkdir -p "$SKILL_DIR" "$CMD_DIR"
+cp -r "$SRC/skills/." "$SKILL_DIR/"
+
+cp "$SRC/commands/"*.md "$CMD_DIR/"
 
 echo "installed:"
-echo "  skill   $SKILL_DIR"
-echo "  command $CMD_DIR/kontrolg.md"
+echo "  skills   kontrolg, store-preflight"
+echo "  commands /kontrolg, /store-preflight"
 echo
-echo "Open a new Claude Code session and type /kontrolg"
+echo "Open a new Claude Code session and type /kontrolg or /store-preflight"
