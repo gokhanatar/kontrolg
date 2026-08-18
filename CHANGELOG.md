@@ -28,3 +28,11 @@ Rules were tuned across passes on live React / Capacitor / Supabase / Firebase p
 Rules cover account deletion, privacy declarations vs. actual SDK behavior, the iOS privacy manifest and required-reason APIs, permission and purpose-string problems, minimum functionality risk for webview wrappers, payments, UGC requirements, build configuration, listing gaps, families policy, and encryption compliance.
 
 Store policy thresholds are deliberately not hardcoded — the skill points at the official pages and is instructed to admit uncertainty rather than invent a requirement.
+
+## [1.1.1] — 2026-08-18
+
+Two changes, both from a second field pass on a live Capacitor + Firebase app.
+
+### Changed
+- **Backward compatibility is now an ask-first gate.** A server-side change (security rules, schema, API contract) that the currently released client cannot survive must be raised as a decision *before* deploying, not noted afterwards. In the pass that prompted this, closing a genuine revenue-bypass hole in Firestore rules also broke a paid feature for every user on the shipped build — correct to fix, but the timing should have been the user's call, because mobile review latency makes it irreversible for days.
+- **Unmeasured performance findings are capped at P2.** The baseline table is now a required report section rather than an instruction that can be skipped, and a finding with no number must say "not measured — why". Reasoning is enough to raise an item, not to rank it or to claim the fix worked. Two passes in a row had produced confident performance findings with no measurement at all.

@@ -110,14 +110,19 @@ Assumptions: ...
 ## Irreversible decisions
 [Things that become expensive if not decided now]
 
+## Performance baseline
+[Required whenever the performance category was scanned. Numbers, or "not measured — why".]
+
 ## Unverified live changes
-[Anything already in production that no real client or device has exercised. Write "none" if empty.]
+[Anything already in production that no real client or device has exercised. Also anything deployed that the currently released client build cannot use. Write "none" if empty.]
 
 ## Remediation log
 [Filled in during Phase 4]
 ```
 
-If the performance category was scanned, write the baseline table from `performance-audit.md` section 0 into the report whether or not findings emerged. Later passes need it to compare against.
+If the performance category was scanned, the report **must** contain the baseline table from `performance-audit.md` section 0, whether or not findings emerged. It is a required section, not an optional one. Later passes need it to compare against.
+
+A performance finding without a measured number is not a P1. Reasoning alone — "this recomputes on every keystroke", "this serializes on every setState" — is enough to *raise* the item, but not to rank it or to claim the fix worked. So: if you can measure it, measure it, and write the before/after row. If you genuinely cannot (no device, no profiler access, the user is unavailable), write **"not measured — why"** next to the finding and cap it at P2. Do not silently promote an estimate into a ranked finding; two passes in a row of confident-sounding unmeasured performance work is how a report stops being trustworthy.
 
 After writing the report, give the user **a short summary in chat**: P0 count, the three most critical items, estimated effort. Do not paste the whole report into the conversation.
 
@@ -135,6 +140,7 @@ Once approved, work autonomously — do not ask per item. For each item:
 
 **Ask first, even inside an approved pass:**
 - **Deploying to live infrastructure** — cloud functions, security rules (Firestore/Storage), server configuration, environment variables. Writing code and shipping it to production are two separate decisions; the second is always asked separately. Whatever is deployed must be revertible, and the user must be told how.
+- **A server-side change the currently released client cannot survive.** Before deploying rules, a schema change, or an API contract change, work out what the shipped build does today. If tightening a rule closes a path the live app still uses — a paid feature, a login flow, a sync call — say so plainly and let the user choose: deploy now and accept that the feature is broken for every existing user until a new build clears review, or hold and ship both together. On mobile, review latency makes this irreversible for days. It is the decision itself, never a line to note afterwards in "remaining work".
 - Migrations that alter the database schema (especially against a live database)
 - Adding a new dependency
 - Refactors touching five or more files
