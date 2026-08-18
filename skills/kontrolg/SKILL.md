@@ -18,6 +18,7 @@ The goal is not to give generic advice. The goal is: **look at this repo, in thi
 3. **Front-load the irreversible decisions.** Auth model, ID type, multi-tenancy approach, row-level security, migration discipline, money representation — changing these later rewrites the whole data layer. They are always P0.
 4. **Make small, verifiable changes.** One fix per commit, build and tests after every commit.
 5. **Respect the existing code.** Follow the patterns already in the repo; do not impose your own architectural taste.
+6. **An audit is a filter, not a guarantee.** A clean pass means the known patterns did not fire — not that the code is safe. Authorization correctness, cross-policy interaction, and real runtime isolation cannot be certified by reading; they are reasoned about, and only *tests* establish behavior. Never let the report — or the chat summary — imply "you're safe now". Say what was checked, what held, and what remains unverified. Overclaiming safety is the one failure mode that gets a user breached in production.
 
 ---
 
@@ -70,7 +71,7 @@ Scan every category. For the category list and terminology pool see `references/
 
 Scan order (higher is more critical):
 1. Secret and credential leakage
-2. Authorization (BOLA/IDOR, RLS, tenant isolation)
+2. Authorization (BOLA/IDOR, RLS, tenant isolation) — including **the trust boundary**: what is enforced only on the client that must be server-authoritative (prices, entitlement, consumption, access). Trace client-controllable input to any consequential write and ask what stops the client from lying.
 3. Injection and input validation
 4. Data layer (indexes, N+1, transactions, migrations, money and date types)
 5. Idempotency and consistency, including **race conditions and read-modify-write** — the interleaving bugs where payment and inventory logic breaks
@@ -123,6 +124,9 @@ Assumptions: ...
 ## Unverified live changes
 [Anything already in production that no real client or device has exercised. Also anything deployed that the currently released client build cannot use. Write "none" if empty.]
 
+## What this pass did NOT verify
+[Mandatory. A pass finds patterns; it does not certify safety. State plainly what remains unchecked so no one reads the report as a guarantee. At minimum, name: business-logic correctness of authorization policies (a syntactically valid policy can still permit the wrong access); cross-policy and cross-table interaction under real conditions; runtime isolation between roles unless tests were actually run and are cited here; anything in a category marked "not applicable" or "not measured"; and any code path not reached by the scan. If role-isolation tests were written and run, say which boundaries they proved; if not, say that isolation was reasoned about but not executed. This section protects the user from false confidence — never omit it or reduce it to "looks good".]
+
 ## Remediation log
 [Filled in during Phase 4]
 ```
@@ -167,6 +171,7 @@ Once approved, work autonomously — do not ask per item. For each item:
 - Tell the user: how many items were applied, how many commits, which branch, what they must do manually
 - **Never leave a deployed-but-unverified change unspoken.** If the server side went live while the client side was never tested, state that asymmetry and how to roll it back
 - If a secret leak was found, repeat it separately and clearly so it does not get lost
+- **State the limits out loud.** In the chat summary, not just the report, say what the pass did not verify — especially that authorization policies were read for intent but their correctness under real conditions is only proven by the role-isolation tests (if those were run, name the boundaries they proved; if not, say isolation was reasoned about, not executed). If the user frames the result as "now we're safe", correct it plainly and kindly: the pass raised the floor and named the gaps; safety comes from the layered defenses and the tests, not from the audit having run.
 
 ---
 

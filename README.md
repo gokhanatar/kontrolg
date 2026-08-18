@@ -78,10 +78,14 @@ The **principles** below are stack-independent — an ownership check on an ID l
 <table>
 <tr><td width="50%" valign="top">
 
-**Security**
+**Security & authorization**
 - Secret leakage (including git history, and `VITE_`/`NEXT_PUBLIC_` keys that ship to the client)
 - BOLA/IDOR — the number-one real API flaw
-- RLS policies, tenant isolation, `using (true)` mistakes
+- Trust boundary — what's enforced only on the client (prices, entitlement, credit spend, access) that must be server-authoritative
+- RLS **policy logic**, not just presence — `using` vs `with check`, verb asymmetry (strict insert / loose update), helper-function trust, `SECURITY DEFINER` exposure
+- Cross-policy and cross-table reach, column-level exposure, self-escalation (`role`/`tier`/`is_admin`)
+- Defense in depth — flags where RLS is the *sole* lock, and service-role paths that bypass it
+- Role-isolation **test generation** — proves the boundary holds instead of asserting it
 - Mass assignment, injection, file upload handling
 - Auth: token storage, rotation, brute-force protection
 

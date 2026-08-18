@@ -91,6 +91,75 @@ rg -n '\.\.\.(req\.body|body|payload|data)\b' --type ts --type js
 ```
 Spreading the whole request body into an insert or update lets a user send `role: "admin"`. Check for a whitelist or schema validation.
 
+### Read the policy logic — presence is not correctness
+
+This is the step that separates a real authorization audit from a checkbox. A policy existing tells you nothing; **what it permits** is the finding. Open every policy and every helper function it calls, and reason about who actually gets through.
+
+```bash
+rg -n 'create policy|using \(|with check \(' -i supabase/migrations/ 2>/dev/null -A3
+# helper functions a policy trusts — their logic IS the policy
+rg -n 'create (or replace )?function' -i supabase/migrations/ 2>/dev/null -A8
+```
+
+- **`using` vs `with check`.** `using` controls which rows are *visible*; `with check` controls what a write is *allowed to produce*. A policy with `using` but no `with check` lets a user update a row they can see into a state they should never be able to set (e.g. flipping `owner_id` to someone else, or `tier` to premium). Missing `with check` on an update/insert policy is a finding.
+- **Operation asymmetry.** Read the `select` / `insert` / `update` / `delete` policies as a *set*. The classic breach is a policy that is strict on insert but loose on update — the same record reached by a different verb. If insert forces `user_id = auth.uid()` but update only checks `using (auth.uid() = user_id)` with no `with check`, a user can update their row and change its owner. Check every verb, not just the one that looks protected.
+- **Helper-function trust.** A policy like `using (is_team_member(team_id))` is only as correct as `is_team_member`. Open it. Does it still return true after a member is removed, a team is deleted, or a subscription lapses? Does it read from a table that itself has weaker RLS? A `SECURITY DEFINER` function bypasses RLS entirely and runs as its owner — trace what it exposes.
+- **Cross-table / cross-policy reach.** Ask: can a user reach protected data *indirectly*? A strict policy on `messages` is defeated if `message_reactions` joins to it with a laxer policy, or if a view or `SECURITY DEFINER` function returns joined rows without re-checking. Isolation is a property of the whole schema, not one table.
+- **Column-level exposure.** RLS protects *rows*, not *columns*. A user may legitimately own a row but still read a column they shouldn't (another user's email on a shared record, an internal flag). Postgres column privileges or a view are the fix; note where a row-level check is doing a column-level job.
+- **Self-escalation paths.** Can a user write to their own `role`, `tier`, `is_admin`, `credits`, or `verified` field? This is mass assignment and RLS meeting: even with `user_id = auth.uid()`, if the policy's `with check` doesn't pin the privileged columns, the user escalates themselves. Grep the writable columns against the sensitive ones.
+
+If the repo has an `INVARIANTS.md` with tenancy or access rules ("a user never reads another user's messages", "only an owner edits billing"), check each policy set against those statements directly — that is the intent the raw SQL can't tell you.
+
+### Defense in depth — RLS must not be the only lock
+
+```bash
+rg -n 'service_role|SERVICE_ROLE|supabaseAdmin|createClient.*service' --type ts --type js
+```
+
+- If a server path uses the **service-role key**, RLS is bypassed entirely on that path — every authorization check must then be in the application code. Verify it is. A service-role client behind an endpoint with a weak or missing check is a full-table exposure.
+- The strongest posture is layered: a server-side authorization check **and** RLS **and** input validation, so one gap does not become a breach. Flag anywhere RLS is the *sole* line of defense for sensitive data, not as a bug but as a fragility — one policy edit away from exposure.
+
+### Prove isolation with tests, don't just assert it
+
+A read of the policies establishes intent. Only a test establishes behavior. Where the project has any test setup (or can get one cheaply), propose — and with approval, write — role-isolation tests that run real queries and assert the boundary holds:
+
+- as **anon**: sensitive tables return nothing
+- as **user A**: reads/writes only A's rows; attempts on B's specific IDs return empty or error
+- as **user B**: the mirror, so a one-sided policy can't pass by accident
+- as **a revoked/removed member**: access that should have ended actually ended
+- attempting **self-escalation**: writing `role`/`tier`/`is_admin` on own row is rejected
+
+This is the difference between "a policy exists" and "the boundary holds". Test generation is opt-in (it adds a dependency and files — an ask-first action), but it is the single highest-confidence thing an authorization pass can leave behind.
+
+## 2b. Trust boundary — what must live on the server
+
+The client is an untrusted input device. Anything the user's device can lie about, where the lie has a security, money, or data-integrity consequence, must be decided and enforced on the server. This is the architectural framing behind half the findings above; scan for it explicitly, because a value that flows from the client into a trusted write is the single most common real breach.
+
+The principle is stack-independent. The detection: trace user-controllable input to any consequential decision and ask **"what stops the client from lying here?"** If the only enforcement lives in client code (a React handler, the mobile app) with no server / RLS / cloud-function counterpart, that is a finding — severity set by what the lie buys the user.
+
+**Must be server-authoritative — flag if enforced only on the client:**
+- **Access and authorization decisions.** A client role check hides a button; it does not protect the endpoint. There must be a server- or RLS-side counterpart. (Cross-references section 2.)
+- **Prices, totals, discounts, tax.** Never trust an amount sent from the client. The server computes from a server-side source of truth. A checkout that charges `req.body.amount` or `body.price` is a P0.
+
+```bash
+rg -n 'body\.(amount|price|total|cost|quantity|discount)|req\.body\.(amount|price|total)' --type ts --type js
+```
+- **Consumption of inventory, credits, balance, quota.** The server decrements, atomically (see race conditions). "I have 3 credits left" from the client is a claim, not a fact.
+- **Granting entitlement** — `premium`, `tier`, `role`, `is_admin`, `verified`, `credits`. Set by the server after it verifies the condition (payment, ownership), never accepted from the client. (Cross-references mass assignment and self-escalation.)
+- **Payment and receipt verification.** Validated server-side against the provider. A client-sent "purchase succeeded" flag is forgeable.
+- **Secrets** — third-party API keys for paid or privileged services, signing keys, DB credentials. If it is in the client bundle it is public (see secret leakage).
+- **Security-consequential validation.** Client validation is fast feedback; the server must re-validate every input it then trusts.
+- **Rate limiting and abuse controls** for anything costly or sensitive.
+- **Tokens and expiries with security meaning** — reset tokens, session lifetimes, access windows. Server clock, server-generated (see time & money).
+- **Webhook authenticity** — signature verified server-side (see idempotency).
+
+**Can stay local — do not flag:**
+- Pure presentation and UX state, formatting, optimistic UI.
+- Client-side validation *in addition to* server validation — a fast-feedback layer, never the only one.
+- Non-sensitive caching and non-security feature flags.
+
+The tell is almost always the same shape: a client-controlled value reaching a trusted write or an access decision without the server recomputing or re-checking it. When you find one, the fix is not "validate harder on the client" — it is to move the decision server-side and treat the client value as a request, not a fact.
+
 ---
 
 ## 3. Injection and input validation

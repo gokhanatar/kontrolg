@@ -55,3 +55,18 @@ Broadened what a pass looks for, and made re-runs sharper — all aimed at the c
 
 ### Changed
 - **Principle vs. detection, made explicit.** Every category now separates the stack-independent *principle* (which holds in any language) from the *detection command* (tuned to JavaScript/TypeScript, Postgres/Supabase, and Firebase, where the skill was field-tested). On other stacks the skill applies each category as a checklist by hand and says so, rather than reporting a category "clean" because a JS-shaped search matched nothing on, say, a Python repo. This keeps the tool honest about where its automated matching is reliable instead of claiming a generality it hasn't been tested for.
+
+## [1.3.0] — 2026-08-18
+
+Deepened authorization from a presence check into a logic review, and made the report structurally honest about what it cannot certify.
+
+### Added
+- **Policy logic review.** The authorization category no longer stops at "does a policy exist". It reads what each policy *permits*: `using` vs `with check` (a visible row updated into a forbidden state), verb asymmetry (strict insert, loose update — the same record reached by a different path), helper-function trust (`is_team_member` that still returns true after removal; `SECURITY DEFINER` that bypasses RLS), cross-table and cross-policy reach, column-level exposure (RLS guards rows, not columns), and self-escalation paths (writing your own `role`/`tier`/`is_admin`).
+- **Defense in depth.** Flags where RLS is the sole line of defense, and where a service-role key bypasses it entirely so the check must live in application code.
+- **Role-isolation test generation.** With approval, the pass writes tests that run real queries as anon / user A / user B / a revoked member / a self-escalation attempt, and assert the boundary holds. A read of the policies establishes intent; only a test establishes behavior.
+
+### Changed
+- **New mandatory report section: "What this pass did NOT verify."** A pass finds patterns; it does not certify safety. The report must now state plainly what remains unchecked — authorization correctness under real conditions, cross-policy interaction, runtime isolation unless tests were run — so no one reads it as a guarantee. A new core principle ("an audit is a filter, not a guarantee") and a close-out step enforce the same honesty in the chat summary: if the user frames the result as "now we're safe", the skill corrects it plainly rather than letting false confidence ship to production.
+
+### Added (trust boundary)
+- **Explicit trust-boundary lens** in the authorization pass. Previously the "client can't be trusted" concern was scattered across UI-only auth, client-supplied time, mass assignment, and client-bundle secrets. It is now a consolidated check: trace any client-controllable value to a consequential decision (price, entitlement, credit/inventory consumption, access) and flag anything enforced only on the client with no server/RLS counterpart. Severity is set by what the lie buys the user — a checkout charging `req.body.amount` is a P0; cosmetic client state is not a finding. The section also names what legitimately stays local, so the check doesn't generate noise.
