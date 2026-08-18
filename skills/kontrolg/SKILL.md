@@ -64,6 +64,8 @@ If no answer comes, assume the most conservative case (live + sensitive data) an
 
 Read `references/audit-rules.md` — the stack-specific commands and detection patterns live there.
 
+The detection commands are tuned to JavaScript/TypeScript (React, Vite, Node, Capacitor) plus Postgres/Supabase and Firebase. If the project is on another stack — Django, Rails, Go, .NET, Laravel, Spring — the *principles* in every category still apply, but the grep commands will not match. In that case, use each category as a checklist: read for the same shape of mistake in that ecosystem's idioms, and never mark a category "clean" just because a JS-shaped search found nothing. Say the automated check does not cover this stack and you inspected by hand.
+
 Scan every category. For the category list and terminology pool see `references/concept-checklist.md`; its "symptom → concept" table is a shortcut from a complaint to the relevant concept.
 
 Scan order (higher is more critical):
@@ -71,15 +73,19 @@ Scan order (higher is more critical):
 2. Authorization (BOLA/IDOR, RLS, tenant isolation)
 3. Injection and input validation
 4. Data layer (indexes, N+1, transactions, migrations, money and date types)
-5. Idempotency and consistency (payments, webhooks, retries)
-6. Startup and runtime performance — **measure a baseline first** (`references/performance-audit.md`, section 0). No performance finding is written without a number; "feels slow" is not a finding. After each fix, measure the same metric again and put the before/after row in the report.
-7. Error handling and observability
-8. Async, cancellation, resource leaks
-9. API surface (pagination, rate limits, error format)
-10. Deploy and configuration hygiene
-11. Store and regulatory compliance (GDPR/CCPA, account deletion, permissions) — if mobile or handling user data
+5. Idempotency and consistency, including **race conditions and read-modify-write** — the interleaving bugs where payment and inventory logic breaks
+6. Time and money arithmetic — timezone/DST drift, duration from `Date.now()`, float money, rounding order, client-supplied time
+7. Startup and runtime performance — **measure a baseline first** (`references/performance-audit.md`, section 0). No performance finding is written without a number; "feels slow" is not a finding. After each fix, measure the same metric again and put the before/after row in the report.
+8. Error handling and observability
+9. Async, cancellation, resource leaks
+10. API surface (pagination, rate limits, error format)
+11. Deploy and configuration hygiene
+12. Dependencies and supply chain — lockfile, reachable advisories, install scripts, unpinned ranges (ranked, not a wall of upgrades)
+13. Store and regulatory compliance (GDPR/CCPA, account deletion, permissions) — if mobile or handling user data
 
 If a category does not apply, write one line — **"not applicable — why"** — and move on. This raises the credibility of the whole report.
+
+**Business-logic invariants.** Pattern scanning cannot see intent — "no user can hold a premium feature without spending inventory" is not a syntax rule. If the repo has an `INVARIANTS.md` (or a `## Invariants` section in its README or CLAUDE.md), read it: each line is a rule the code must never violate, written by the person who knows the domain. Trace each invariant to the code paths that could break it and report any that can. If no such file exists and the app has payment, inventory, or access-tier logic, suggest the user write one — three or four plain sentences is enough — because it closes exactly the gap pattern scanning leaves open. Do not invent invariants the user did not state; an assumed business rule is worse than none.
 
 ### Phase 3 — Report
 
@@ -99,6 +105,7 @@ Assumptions: ...
 - **Where:** `path/file.ts:42`
 - **Problem:** [what it is, concretely]
 - **Why it matters:** [what happens when it fires]
+- **Evidence:** [a one-line command the user can run to see it themselves — the grep/rg that surfaced it, or the file:line to open. This lets a skeptical user verify without trusting the report, and forces the finding to be real.]
 - **Fix:** [what to do, how many files are affected]
 - **Effort:** S / M / L
 
@@ -165,7 +172,13 @@ Once approved, work autonomously — do not ask per item. For each item:
 
 ## Re-running
 
-If `KONTROLG-REPORT.md` already exists: read the old one, mark previous findings resolved or unresolved, and surface only new findings and regressions. Do not regenerate the same report from scratch.
+If `KONTROLG-REPORT.md` already exists: read the old one and reconcile it against the current code before writing anything new. For each previous finding, use its **Evidence** command — re-run it. Three outcomes, and name each explicitly in the new report:
+
+- **Resolved** — the evidence command now comes back clean. Mark it fixed; do not re-litigate it.
+- **Still open** — the evidence still fires. Carry it forward at its original priority.
+- **Regressed** — a finding that a prior report marked resolved is firing again. This is the highest-signal outcome a re-run produces: something a past pass fixed has broken again, usually from a deploy or a merge. Surface regressions at the top, above new findings, because a reintroduced P0 is more urgent than a fresh P2 — someone believed this was handled.
+
+Then scan for new findings as normal. Do not regenerate the whole report from scratch; the value of a re-run is the delta.
 
 If the user names a category (`kontrolg security`), scan only that category but still run Phase 0 and Phase 3.
 

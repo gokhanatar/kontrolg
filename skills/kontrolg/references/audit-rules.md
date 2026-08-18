@@ -2,6 +2,17 @@
 
 This file covers *how to look*. Commands assume `ripgrep` (`rg`); fall back to `grep -rn`. Always exclude `node_modules`, `dist`, `build`, `.git`.
 
+## Two layers: principle vs. detection
+
+Each category below has two parts, and they generalize differently.
+
+- **The principle** — "a record fetched by ID needs an ownership check", "money is never a float", "a read-modify-write outside a transaction loses writes" — is **stack-independent**. It is as true in Django, Rails, Go, or .NET as in Node. When you audit a stack these commands do not target, apply the principle by hand: read the code for the same *shape* of mistake, even though the grep below won't match it.
+- **The detection command** — the specific `rg` pattern, the file paths, the `--type ts --type js` filter, the `package.json` lookups — is **tuned to the JavaScript/TypeScript ecosystem** (React, Vite, Node, Capacitor) plus Postgres/Supabase and Firebase on the data side. That is where these rules were built and field-tested, so that is where the automated matching is reliable.
+
+So: on a JS/TS + Postgres/Firebase project, the commands do the work. On any other stack, treat this file as a checklist of principles and translate each detection step into that ecosystem's equivalent (the ORM's raw-query escape hatch, that language's float type, its migration tool). Do not report a category as "clean" just because a JS-shaped grep returned nothing on a Python repo — that is the "absence mistaken for proof" error, one level up. Say instead that the automated check does not cover this stack and you inspected by hand.
+
+Detection rules for other stacks are the single most valuable contribution to this skill; see CONTRIBUTING.md.
+
 ---
 
 ## Verification protocol (read before scanning)
@@ -130,9 +141,50 @@ rg -n 'retry|backoff' -i
 - If retries exist, is the receiver idempotent (the mandatory partner of at-least-once delivery)?
 - Is long-running work (reports, email, AI calls, video) running inside the HTTP request? It belongs in a queue or background job.
 
+### Race conditions and read-modify-write
+
+The most dangerous consistency bugs are not syntactic — the code is correct, the *interleaving* is wrong. This is where payment and inventory logic breaks, so scan it deliberately.
+
+```bash
+# read-then-write without a transaction (the classic non-atomic counter)
+rg -n 'get\(\)|getDoc|\.data\(\)|findOne|SELECT' -A6 | rg -n 'update|set\(|save\(|UPDATE'
+# manual counter mutation instead of an atomic operator
+rg -n 'count\s*\+|balance\s*[-+]|inventory\s*[-+]' --type ts --type js | head -20
+rg -n 'increment|FieldValue\.increment|atomic' -i
+# multiple functions writing the same document/table
+rg -n 'writeBatch|runTransaction|BEGIN|FOR UPDATE' -i
+```
+
+Check:
+- **Read-modify-write outside a transaction.** `const doc = await get(); await set(doc.count + 1)` loses writes under concurrency — two clients read the same value, both write value+1, one increment vanishes. Use an atomic operator (`increment()`, `FieldValue.increment`, `UPDATE ... SET n = n + 1`) or a transaction.
+- **Manual counters and balances.** Any `balance - amount`, `inventory - 1`, `count + 1` computed in application code and written back is a race unless it runs inside a transaction. This is exactly how a user spends the same credit twice.
+- **Two writers, one document.** If more than one cloud function or endpoint writes the same record, ask what happens when they run at the same time. Last-write-wins silently discards the other's change.
+- **Check-then-act.** `if (!exists) create()` and `if (balance >= price) charge()` are races unless check and act are atomic. Server-authoritative consumption plus a client guard is the pattern; a client-only guard is decorative.
+- **In-flight guards.** For actions that spend inventory or money, is there a guard against a double-tap firing two parallel requests? The server must be the real defense, but the guard prevents the wasteful second transaction.
+
 ---
 
-## 6. Startup and performance
+## 6. Time and money arithmetic
+
+Silent, expensive, and invisible to a type checker. A wrong number that still type-checks ships to production and corrupts data or revenue.
+
+```bash
+rg -n 'new Date\(|Date\.now\(\)|getTime\(\)|setHours|getTimezoneOffset' --type ts --type js | head -30
+rg -n 'expiresAt|expiry|duration|ttl|validUntil|renewal|activeUntil' --type ts --type js | head
+rg -n 'price.*[*/]|amount.*[*/]|Math\.round|toFixed|parseFloat' --type ts --type js | head -20
+```
+
+Check:
+- **Duration from `Date.now()` and local time.** `Date.now() + days*86400000` is fine in UTC but breaks the moment local time, DST, or the device clock enters the calculation. Expiries, boosts, trials, and subscription periods are computed and stored in UTC; the display layer localizes.
+- **Timezone drift.** `new Date('2026-01-01')` parses as UTC, `new Date(2026,0,1)` as local — mixing them shifts dates by hours. Any date crossing the client/server boundary should be ISO 8601 with an explicit zone.
+- **DST edges.** "Every day at 9am" and "24 hours from now" are not the same thing twice a year. Recurring schedules built by adding milliseconds drift across a DST change.
+- **Float money.** `0.1 + 0.2 !== 0.3`. Price arithmetic in floating point accumulates error. Store and compute in integer minor units; format to a decimal only for display. (Storage is flagged in the data layer; here the concern is *computation*.)
+- **Rounding order.** Rounding before summing vs. after gives different totals; per-line-item vs. per-invoice rounding is a reconciliation bug. Tax and discount multiplication order matters — decide it once, be consistent.
+- **Client-supplied time.** Never trust a timestamp, expiry, or duration from the client for anything with money or access implications. The server sets the clock.
+
+---
+
+## 6b. Startup and performance
 
 Read `performance-audit.md` in full before scanning this category. Never write a performance finding without a measured number.
 
@@ -246,6 +298,29 @@ rg -n 'limit\(|orderBy\(|startAfter\(' --type ts --type js
 - **Denormalization cost**: counters and totals computed on every read should live in a field maintained with `increment()`.
 - **Storage rules**: are file size and content-type constrained? Without them anyone uploads anything, without limit.
 - **Quota blowout**: is there a budget alarm (App Check + budget alert)?
+
+---
+
+## 14. Dependencies and supply chain
+
+The code you did not write is still code you ship. A compromised or abandoned dependency is a live attack surface, and a lockfile problem is how the same repo builds differently on two machines.
+
+```bash
+ls package-lock.json yarn.lock pnpm-lock.yaml 2>/dev/null
+npm audit --production 2>/dev/null | tail -20 || echo "run npm audit manually"
+rg -n '"(preinstall|postinstall|prepare)"' package.json
+rg -n '"[^"]+":\s*"(\*|latest|>=?0)' package.json    # unpinned ranges
+```
+
+Check:
+- **Lockfile committed and honored.** No lockfile means every install is a different build. A lockfile that drifts from `package.json` is nearly as bad. Installs in CI should use the frozen lockfile (`npm ci`, not `npm install`).
+- **`npm audit` triage — not blind upgrading.** Read the output, but do not propose upgrading everything. A critical advisory in a transitive dev dependency that never runs in production is not the same as one in a runtime path. Rank by whether the vulnerable code is actually reachable in the shipped app.
+- **Install scripts.** `postinstall`/`preinstall` scripts run arbitrary code at install time — the primary supply-chain attack vector. Flag any dependency that adds one, especially recently added or low-download packages.
+- **Unpinned ranges.** `"*"`, `"latest"`, or a wide `">=0"` range means an install can silently pull a new major. For anything security-relevant, pin.
+- **Abandoned and duplicated packages.** A dependency with no releases in years, or two packages doing the same job (two date libraries, two HTTP clients), is both a bundle-size and a maintenance finding.
+- **Phantom dependencies.** Code that imports a package not listed in `package.json` (it resolves only because a transitive dep happens to provide it) breaks the moment that transitive tree changes.
+
+Do not turn this into a wall of "upgrade X to Y". The output is a *ranked* short list: what is actually reachable, what runs at install time, what is unpinned in a security-relevant spot.
 
 ---
 

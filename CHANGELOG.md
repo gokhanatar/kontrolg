@@ -36,3 +36,22 @@ Two changes, both from a second field pass on a live Capacitor + Firebase app.
 ### Changed
 - **Backward compatibility is now an ask-first gate.** A server-side change (security rules, schema, API contract) that the currently released client cannot survive must be raised as a decision *before* deploying, not noted afterwards. In the pass that prompted this, closing a genuine revenue-bypass hole in Firestore rules also broke a paid feature for every user on the shipped build — correct to fix, but the timing should have been the user's call, because mobile review latency makes it irreversible for days.
 - **Unmeasured performance findings are capped at P2.** The baseline table is now a required report section rather than an instruction that can be skipped, and a finding with no number must say "not measured — why". Reasoning is enough to raise an item, not to rank it or to claim the fix worked. Two passes in a row had produced confident performance findings with no measurement at all.
+
+## [1.2.0] — 2026-08-18
+
+Broadened what a pass looks for, and made re-runs sharper — all aimed at the class of bug pattern-scanning was missing.
+
+### Added
+- **Race conditions and read-modify-write** (in the consistency category) — non-atomic counters, two writers on one document, check-then-act, missing in-flight guards. This is where payment and inventory logic actually breaks; the code type-checks, the interleaving is wrong.
+- **Time and money arithmetic** as its own category — timezone/DST drift, durations built from `Date.now()`, float money, rounding order, and trusting client-supplied timestamps. Silent, expensive, invisible to a type checker.
+- **Dependencies and supply chain** — lockfile discipline, `npm audit` triaged by *reachability* rather than blindly upgrading, install-script scanning, unpinned ranges, phantom dependencies.
+- **Business-logic invariants** — if the repo has an `INVARIANTS.md`, the pass traces each stated rule ("no user holds a premium feature without spending inventory") against the code and reports violations. This closes the gap pattern-scanning structurally cannot: it needs the intent, which only the domain owner can supply. The skill won't invent invariants the user didn't state.
+
+### Changed
+- **Every finding now carries an Evidence line** — a one-line command to reproduce it. A skeptical user can verify without trusting the report, and writing the command forces the finding to be real.
+- **Re-runs now detect regressions explicitly.** Each prior finding's evidence command is re-run and classified resolved / still-open / regressed. A finding a past pass fixed that is firing again is surfaced at the very top — a reintroduced P0 outranks a fresh P2, because someone believed it was handled.
+
+## [1.2.1] — 2026-08-18
+
+### Changed
+- **Principle vs. detection, made explicit.** Every category now separates the stack-independent *principle* (which holds in any language) from the *detection command* (tuned to JavaScript/TypeScript, Postgres/Supabase, and Firebase, where the skill was field-tested). On other stacks the skill applies each category as a checklist by hand and says so, rather than reporting a category "clean" because a JS-shaped search matched nothing on, say, a Python repo. This keeps the tool honest about where its automated matching is reliable instead of claiming a generality it hasn't been tested for.
