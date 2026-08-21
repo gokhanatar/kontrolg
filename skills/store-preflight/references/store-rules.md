@@ -160,6 +160,7 @@ rg -n -i 'subscription|premium|upgrade|pro plan' src/ | head -20
 - Any external purchase link is a hard rejection outside the narrow, region-specific exceptions and their entitlements. If the app links out to a web checkout for a digital subscription, that is a blocker.
 - Subscription screens must show, before purchase: title, length, price per period, what is included, and links to the terms and privacy policy. Missing these is a routine rejection.
 - Restore purchases must exist and work on iOS.
+- **Subscription legal links live in three places, and Apple checks all three (Guideline 3.1.2).** This is one of the most repeated rejections, and developers usually have two of the three. Check each: (1) the paywall itself must show title, length, price, and *tappable* links to the Terms of Use (EULA) and privacy policy; (2) App Store Connect's Privacy Policy field must hold the privacy URL; (3) the Terms of Use link must be in the App Description, or a custom EULA must be entered in App Store Connect's License Agreement field. Using Apple's standard EULA is fine, but then the link belongs in the description — setting the License Agreement field alone does not satisfy it.
 - Receipt validation should happen server-side. Client-only validation is a fraud finding rather than a store one, but it belongs in the report.
 - Free trials must state exactly when billing begins.
 

@@ -92,3 +92,8 @@ Both skills gained the gaps that a practitioner checklist surfaced — added onl
 ### Changed
 - **store-preflight now defers to an existing deployment pipeline.** If the project has `store-deployment/`, `deploy-state.json`, or `APP_CONFIG.yaml`, listing field-completeness is already verified against the store API by that tooling, so the pass skips it rather than guessing at it from the repo. What remains is the half an API check cannot do: whether the uploaded values are consistent with what the app actually is — screenshots showing the current build, a description that doesn't promise cut features, an age rating that reflects the UGC and purchase mechanics in the code.
 - Clarified the intended timing: this pass belongs **early**, before the deployment pipeline runs. Its blockers (account deletion flow, Sign in with Apple, privacy manifest, UGC block/report) are code work, and finding them at submission time costs a release cycle.
+
+## [1.4.2] — 2026-08-21
+
+### Added
+- **Guideline 3.1.2 subscription legal links, in all three required places.** Apple checks the paywall, the App Store Connect privacy field, and the App Description (or a custom EULA in the License Agreement field) — and rejects with the same text when any one is missing. Developers typically have two of the three, which is why this rejection repeats across submissions.
