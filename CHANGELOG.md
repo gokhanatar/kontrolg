@@ -86,3 +86,9 @@ Both skills gained the gaps that a practitioner checklist surfaced — added onl
 - **Sign in with Apple** requirement when third-party logins are the only alternatives.
 - **Listing accuracy**: screenshots must show the current build, no third-party brands or trademarks in metadata, no promising features the binary lacks, age rating matched to UGC and IAP.
 - **After a rejection — the appeal.** Not replying in Resolution Center is itself a common reason an app never ships; many 4.3 and 2.1 rejections reverse once the differentiator is stated plainly and the reviewer is given a path. Claude drafts the reply for the user to send, and says plainly when the app actually does violate the guideline rather than helping word around it.
+
+## [1.4.1] — 2026-08-21
+
+### Changed
+- **store-preflight now defers to an existing deployment pipeline.** If the project has `store-deployment/`, `deploy-state.json`, or `APP_CONFIG.yaml`, listing field-completeness is already verified against the store API by that tooling, so the pass skips it rather than guessing at it from the repo. What remains is the half an API check cannot do: whether the uploaded values are consistent with what the app actually is — screenshots showing the current build, a description that doesn't promise cut features, an age rating that reflects the UGC and purchase mechanics in the code.
+- Clarified the intended timing: this pass belongs **early**, before the deployment pipeline runs. Its blockers (account deletion flow, Sign in with Apple, privacy manifest, UGC block/report) are code work, and finding them at submission time costs a release cycle.

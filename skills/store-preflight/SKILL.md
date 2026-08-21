@@ -31,6 +31,10 @@ If the tree is dirty, ask the user to commit or stash before any fix phase. Crea
 
 ### Phase 1 — Discovery
 
+**Check for an existing deployment pipeline first.** If `store-deployment/`, `deploy-state.json`, or `APP_CONFIG.yaml` exist, the project already has tooling that verifies listing state against the store API. Say so, and scope this pass to what that tooling cannot do: reading the code and judging whether the app itself complies. Skip field-presence checks entirely — do not duplicate them, and do not contradict a report built from live API data with a guess made from the repo.
+
+**Run this pass early — well before the deployment pipeline.** Its blockers are code work: writing an account deletion flow, adding Sign in with Apple, creating a privacy manifest, adding block/report to a UGC surface. Discovering those at submission time costs a release cycle. A pipeline's verification step runs at the end by design; this one belongs at the start.
+
 ```bash
 ls -la; cat package.json 2>/dev/null
 cat capacitor.config.* 2>/dev/null

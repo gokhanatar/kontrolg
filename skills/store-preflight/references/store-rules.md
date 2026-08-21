@@ -203,22 +203,21 @@ rg -n 'billing|com.android.billingclient' android/app/build.gradle 2>/dev/null
 
 ## 9. Store listing
 
-Not in the repo, so most of this belongs in "needs your confirmation" — but ask about all of it, because listing problems delay a submission just as effectively as code problems:
+**First, check whether a deployment pipeline already owns this.** If the project has a `store-deployment/` directory, a `deploy-state.json`, or an `APP_CONFIG.yaml`, then field-level completeness (is the metadata uploaded, are all screenshot sizes present, is the age questionnaire filled, are prices set per territory) is already verified against the store API by that pipeline, with its own report. Do not re-check field presence — you cannot see the store account from the repo anyway, and duplicating it produces a worse answer than the API check.
 
-- Privacy policy URL, live and reachable (both stores require it; Play requires it in the listing, Apple in App Store Connect)
-- Support URL that resolves to something real
-- A **working demo account** if any content sits behind a login — the most common avoidable delay, because the reviewer simply cannot get in. Include any second factor workaround and a note for region-locked content.
-- Review notes explaining anything non-obvious, especially permissions and any hardware the app expects
-- Screenshots for every required device size, showing the actual app rather than marketing art
-- **Screenshots must show the actual current app.** Marketing frames, mockups of features that do not exist, or screenshots from an older version are a rejection. Every device size that is required must be present.
-- **No other companies' brands or trademarks** in the name, subtitle, description, or keywords — including "for X", "like X", or a competitor's name used for search traffic. This includes brands whose logos appear in screenshots.
-- **Do not promise what the build does not do.** A description mentioning a feature that is not in this binary is treated as misleading, even if the feature ships next month.
-- **Age rating must match the content**, including user-generated content, chat, gambling-like mechanics, and in-app purchases. An 18+ social app rated 4+ is both a rejection and a regulatory problem.
-- Description free of competitor names, unsupported claims, and keyword stuffing
-- Age rating answers consistent with the content, including UGC and in-app purchases
-- If the app requires external hardware or a specific region, say so in the notes or expect a rejection for "unable to review"
+```bash
+ls store-deployment/ APP_CONFIG.yaml deploy-state.json 2>/dev/null
+```
 
----
+What stays yours in either case is the part an API check cannot judge: **whether the value that was uploaded is consistent with what the app actually is.** A field can be filled and still be a rejection.
+
+- **Screenshots must show the actual current app.** A pipeline confirms the 6.9" set exists; it cannot tell that those frames are from an older build, are marketing mockups, or show a feature that was cut. Compare against what the code renders.
+- **No other companies' brands or trademarks** in the name, subtitle, description, or keywords — including "for X", "like X", or a competitor's name used for search traffic, and logos visible inside screenshots.
+- **Do not promise what the build does not do.** A description mentioning a feature not in this binary is misleading even if it ships next month. Read the description against the actual routes and features in the code.
+- **Age rating must match the content.** The questionnaire being answered is not the same as it being answered correctly. If the code has chat, user profiles, UGC, or purchase mechanics, check the rating reflects them. An 18+ social app rated 4+ is both a rejection and a regulatory problem.
+- **A working demo account**, if content sits behind a login — including a second-factor workaround and a note for region-locked content. The reviewer being unable to get in is the most common avoidable delay.
+- **Review notes** explaining anything non-obvious: permissions, expected hardware, region requirements, and the exact path to any feature that is hard to find.
+- Privacy policy and support URLs that are **live and reachable**, not merely present as strings. If you cannot fetch them, put them in "needs your confirmation" rather than assuming.
 
 ## 10. Children and families
 
