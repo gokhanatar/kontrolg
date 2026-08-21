@@ -70,3 +70,19 @@ Deepened authorization from a presence check into a logic review, and made the r
 
 ### Added (trust boundary)
 - **Explicit trust-boundary lens** in the authorization pass. Previously the "client can't be trusted" concern was scattered across UI-only auth, client-supplied time, mass assignment, and client-bundle secrets. It is now a consolidated check: trace any client-controllable value to a consequential decision (price, entitlement, credit/inventory consumption, access) and flag anything enforced only on the client with no server/RLS counterpart. Severity is set by what the lie buys the user — a checkout charging `req.body.amount` is a P0; cosmetic client state is not a finding. The section also names what legitimately stays local, so the check doesn't generate noise.
+
+## [1.4.0] — 2026-08-21
+
+Both skills gained the gaps that a practitioner checklist surfaced — added only where the skills were genuinely silent, not restated where they already had coverage.
+
+### Added — kontrolg
+- **Session, transport, and credential handling** as its own category: cookie flags (`HttpOnly`/`Secure`/`SameSite`), token storage, password hashing (slow salted KDF, with work factor — plain `sha256` or `md5` is a P0), HTTPS enforcement and HSTS, CORS lockdown including the reflected-origin anti-pattern, security headers, and login brute-force protection. These are cheap to get wrong and each one silently undoes the authorization work: a perfect RLS policy is worthless if the session cookie is readable by injected script.
+- **Error-message leakage and log hygiene** in the observability category — errors that confirm an account exists, and passwords/tokens/PII written into logs.
+- **Backups and cost guardrails** in deploy hygiene: the finding is not a missing backup file but a backup nobody has ever restored, plus retention that outlives an account-deletion promise, plus budget alarms as the cost-side twin of rate limiting.
+- **Adversarial framing** for the authorization pass — stop asking "is there a check?" and start asking "how would I get in?", with concrete probes (another user's object id, a field the UI never exposes, expired/foreign tokens).
+
+### Added — store-preflight
+- **Completeness and originality (2.1 / 4.3)**: launch crash on a clean release build, "coming soon"/placeholder screens, a feature the reviewer cannot find, and template/reskin similarity — flagged explicitly as the trap for a solo developer whose portfolio shares a codebase.
+- **Sign in with Apple** requirement when third-party logins are the only alternatives.
+- **Listing accuracy**: screenshots must show the current build, no third-party brands or trademarks in metadata, no promising features the binary lacks, age rating matched to UGC and IAP.
+- **After a rejection — the appeal.** Not replying in Resolution Center is itself a common reason an app never ships; many 4.3 and 2.1 rejections reverse once the differentiator is stated plainly and the reviewer is given a path. Claude drafts the reply for the user to send, and says plainly when the app actually does violate the guideline rather than helping word around it.

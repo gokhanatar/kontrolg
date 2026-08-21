@@ -73,6 +73,7 @@ Scan order (higher is more critical):
 1. Secret and credential leakage
 2. Authorization (BOLA/IDOR, RLS, tenant isolation) — including **the trust boundary**: what is enforced only on the client that must be server-authoritative (prices, entitlement, consumption, access). Trace client-controllable input to any consequential write and ask what stops the client from lying.
 3. Injection and input validation
+3b. Session, transport, credentials — cookie flags (HttpOnly/Secure/SameSite), password hashing, HTTPS/HSTS, CORS, security headers, login brute-force protection. Cheap to get wrong and each one silently undoes the authorization work above.
 4. Data layer (indexes, N+1, transactions, migrations, money and date types)
 5. Idempotency and consistency, including **race conditions and read-modify-write** — the interleaving bugs where payment and inventory logic breaks
 6. Time and money arithmetic — timezone/DST drift, duration from `Date.now()`, float money, rounding order, client-supplied time

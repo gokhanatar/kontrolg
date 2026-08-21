@@ -129,6 +129,8 @@ A read of the policies establishes intent. Only a test establishes behavior. Whe
 - as **a revoked/removed member**: access that should have ended actually ended
 - attempting **self-escalation**: writing `role`/`tier`/`is_admin` on own row is rejected
 
+Run the same pass adversarially: stop asking "is there a check?" and start asking "how would I get in?" Take a real object id from your own account and try it as another user (the `?id=4472` probe — the most common real API flaw). Try writing a field the UI never exposes. Try the endpoint with no token, an expired token, and another tenant's token. Anything that succeeds is a finding with a ready-made reproduction.
+
 This is the difference between "a policy exists" and "the boundary holds". Test generation is opt-in (it adds a dependency and files — an ask-first action), but it is the single highest-confidence thing an authorization pass can leave behind.
 
 ## 2b. Trust boundary — what must live on the server
@@ -172,6 +174,27 @@ rg -n 'exec\(|execSync\(|spawn\(' --type ts --type js
 - SQL built from a template literal containing user input → convert to a parameterized query.
 - Is there a validation layer: `zod`, `joi`, `yup`, `valibot`, `class-validator`? If none exists and public endpoints do, that is P0/P1.
 - File uploads: size limit, MIME/extension whitelist, and never placing the raw filename into a path.
+
+---
+
+## 3b. Session, transport, and credential handling
+
+Cheap to get wrong, cheap to fix, and each one silently undoes the authorization work above. A perfect RLS policy is worthless if the session cookie is readable by any injected script.
+
+```bash
+rg -n 'httpOnly|httponly|sameSite|samesite|secure:\s*(true|false)|res\.cookie|setCookie|cookies\.set' --type ts --type js
+rg -n 'md5|sha1|createHash|bcrypt|argon2|scrypt|hashSync|password' --type ts --type js | head -20
+rg -n 'cors\(|Access-Control-Allow-Origin|origin:\s*[\x27"]\*|helmet|Strict-Transport-Security|Content-Security-Policy' --type ts --type js
+rg -n 'localStorage\.setItem.*(token|jwt|session|refresh)' -i --type ts --type js
+```
+
+- **Session cookie flags.** `HttpOnly` (JS cannot read it, so XSS cannot steal the session), `Secure` (never sent over plain HTTP), and `SameSite` (`Lax` or `Strict` unless a cross-site flow genuinely needs `None`, which then *requires* `Secure`). Missing `HttpOnly` on a session cookie is the finding — it converts any XSS into full account takeover.
+- **Token storage.** A JWT or refresh token in `localStorage` is readable by any script on the page. An httpOnly cookie is the safer default; if `localStorage` is a deliberate choice, the report should say what compensates for it.
+- **Password hashing.** Only a slow, salted KDF: `bcrypt`, `argon2`, or `scrypt`. `md5`, `sha1`, plain `sha256`, or (worst) plaintext storage is a P0. Check the *work factor* too — a bcrypt cost of 4 is barely better than none.
+- **HTTPS enforced, not merely available.** HTTP must redirect, and HSTS should be set. A login form that also answers on `http://` leaks credentials on any hostile network.
+- **CORS locked to known origins.** `origin: '*'` is only acceptable for a genuinely public, unauthenticated, read-only API. Combined with credentials it is a P0 — and most frameworks silently refuse that combination, which means the developer often "fixes" it by reflecting the request origin, which is worse. Look for reflected-origin patterns.
+- **Security headers** on any web surface: `Content-Security-Policy`, `Strict-Transport-Security`, `X-Content-Type-Options: nosniff`, `X-Frame-Options`/`frame-ancestors` (clickjacking). A `helmet()`-style default is usually enough; the finding is their total absence.
+- **Login brute-force protection.** Rate limit by account *and* by IP, with a lockout or backoff. Also applies to password reset, OTP verification, and any endpoint that confirms whether an account exists.
 
 ---
 
@@ -298,8 +321,9 @@ rg -n 'setInterval|setTimeout' -A5 | rg -n 'clear'
 
 - Rate limits, especially on `login`, `register`, `forgot-password`, OTP, and expensive AI endpoints. Without them you get brute force and runaway bills.
 - Is the error format consistent? Are stack traces or SQL errors reaching the client (information disclosure)?
-- Is CORS set to `*`, and is it combined with credentialed requests?
-- Security headers (CSP, HSTS, X-Content-Type-Options) on the web.
+- **Error messages that leak.** A client-facing error should say what the user can do, not what the system is. Stack traces, SQL text, file paths, library versions, and "user not found" vs "wrong password" (which confirms an account exists) all hand an attacker information. Internal detail belongs in the log, keyed by a correlation id the user can quote.
+- **Log hygiene.** Grep what actually gets written: passwords, tokens, full card numbers, national ID numbers, email/phone at scale, or whole request bodies in logs are a privacy incident waiting for a log export. `rg -n 'console\.log|logger\.(info|debug)' --type ts | rg -i 'password|token|secret|authorization|card|ssn'` is a fast first pass. Also check that verbose/debug logging is off in production builds.
+- CORS, security headers, and transport enforcement are covered in depth in section 3b — check there rather than duplicating here.
 - Is the pagination limit capped (is `?limit=100000` rejected)?
 
 ---
@@ -316,6 +340,18 @@ cat .nvmrc .node-version 2>/dev/null; rg -n '"engines"' package.json
 - Is the build in production mode, and are source maps being published?
 - No CI? Propose a minimal pipeline that at least runs build and lint.
 - Is the lockfile committed?
+
+---
+
+### Backups and cost guardrails
+
+```bash
+rg -n 'backup|pg_dump|point-in-time|PITR|retention' -i --include='*.yml' --include='*.yaml' --include='*.json' --include='*.md' . 2>/dev/null | head
+```
+
+- **Backups exist *and* have been restored once.** An untested backup is a belief, not a recovery plan. The finding is not "no backup file" — it is "no one has ever restored from it, so nobody knows if it works or how long it takes". Ask for the last restore date; if the answer is never, that is the finding.
+- **Retention vs. deletion.** Backups that outlive an account-deletion request quietly break the deletion promise made to users and regulators. Check the retention window against what the privacy policy claims.
+- **Spend and quota alarms.** Any usage-priced dependency — serverless reads/writes, AI model calls, SMS, storage egress — needs a budget alert and, where the platform allows, a hard cap. Without one, a runaway loop or a scraper turns into a bill overnight. This is the cost-side twin of rate limiting: rate limits protect the service, budget alarms protect the wallet.
 
 ---
 

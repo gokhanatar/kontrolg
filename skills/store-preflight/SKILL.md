@@ -58,6 +58,7 @@ Read `references/store-rules.md`. Scan in this order — the top entries cause t
 3. iOS privacy manifest and required-reason APIs
 4. Permissions: declared but unused, used but undeclared, missing or generic purpose strings
 5. Minimum functionality — the real risk for webview wrappers
+5b. Completeness and originality — launch crash, "coming soon"/placeholder screens, a feature the reviewer cannot find (2.1); template/reskin similarity across a portfolio (4.3)
 6. Payments: IAP where required, external payment links, subscription disclosure
 7. User-generated content: moderation, reporting, blocking, EULA
 8. Target API level, SDK minimums, build configuration

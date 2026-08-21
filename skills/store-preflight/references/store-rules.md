@@ -28,6 +28,12 @@ Check:
 - If deletion is partial (legal retention of transaction records), that is allowed but must be disclosed to the user at the moment of deletion
 - Subscriptions: the flow should tell the user that deleting the account does not cancel a store subscription
 
+**Sign in with Apple.** If the app offers any third-party or social login (Google, Facebook, X, Meta) as its *only* alternatives, Apple requires Sign in with Apple as an equivalent option. Apps using only their own email/password account system, or an enterprise/education login, are outside the requirement. A missing Sign in with Apple button next to a Google button is a reliable rejection.
+
+```bash
+rg -n 'signInWithApple|AppleAuthProvider|apple\.com|GoogleAuthProvider|FacebookAuthProvider|signInWith' --type ts --type js | head
+```
+
 ---
 
 ## 2. Privacy declarations vs. what the code actually does
@@ -119,6 +125,29 @@ What to check and recommend: does the app do at least a few things a website can
 
 ---
 
+## 5b. Completeness and originality — 2.1 and 4.3
+
+Two of the most common rejections, and neither is a code bug. Both are judgments a reviewer makes in the first two minutes.
+
+**Incomplete (Guideline 2.1).** The build must be finished, not a preview:
+- **Crash on launch** ends the review immediately. Test a *release* build on a clean device — no dev server, no cached login, airplane mode for one run. Most launch crashes in review are a missing config in the release scheme, not a logic bug.
+- **"Coming soon" screens, placeholder text, greyed-out tabs, lorem ipsum, dead buttons.** Ship the app without the unfinished section rather than showing a stub of it.
+- **A feature the reviewer cannot find.** If a feature needs a specific region, hardware, a second account, or a non-obvious path, the reviewer will conclude it does not exist. Put the exact steps in review notes.
+- Broken links, empty states that look like errors, and anything that requires a backend you have not deployed yet.
+
+```bash
+rg -n -i 'coming soon|çok yakında|yakında|placeholder|lorem ipsum|TODO|Under construction|Beta' src/ | head -20
+```
+
+**Spam / template (Guideline 4.3).** Apple rejects apps that read as one of many near-identical builds:
+- The same codebase reskinned and submitted repeatedly, or an app built from an unmodified template.
+- **This is the trap for a solo developer with a large portfolio**: several apps sharing a template, similar names, and similar screenshots can trip 4.3(b) even when each app is genuinely different. Each submission needs a distinct purpose, its own UI, and metadata that does not read as a series.
+- Duplicate functionality with an app already on the store under a different name.
+
+The fix is product-level, not cosmetic — and this is exactly the case where the appeal (below) matters, because a real differentiator often exists and simply was not stated.
+
+---
+
 ## 6. Payments
 
 ```bash
@@ -181,6 +210,10 @@ Not in the repo, so most of this belongs in "needs your confirmation" — but as
 - A **working demo account** if any content sits behind a login — the most common avoidable delay, because the reviewer simply cannot get in. Include any second factor workaround and a note for region-locked content.
 - Review notes explaining anything non-obvious, especially permissions and any hardware the app expects
 - Screenshots for every required device size, showing the actual app rather than marketing art
+- **Screenshots must show the actual current app.** Marketing frames, mockups of features that do not exist, or screenshots from an older version are a rejection. Every device size that is required must be present.
+- **No other companies' brands or trademarks** in the name, subtitle, description, or keywords — including "for X", "like X", or a competitor's name used for search traffic. This includes brands whose logos appear in screenshots.
+- **Do not promise what the build does not do.** A description mentioning a feature that is not in this binary is treated as misleading, even if the feature ships next month.
+- **Age rating must match the content**, including user-generated content, chat, gambling-like mechanics, and in-app purchases. An 18+ social app rated 4+ is both a rejection and a regulatory problem.
 - Description free of competitor names, unsupported claims, and keyword stuffing
 - Age rating answers consistent with the content, including UGC and in-app purchases
 - If the app requires external hardware or a specific region, say so in the notes or expect a rejection for "unable to review"
@@ -216,6 +249,23 @@ rg -n 'live-update|codepush|@capgo/capacitor-updater' package.json
 ```
 
 Pushing JavaScript over the air is permitted within limits: the update must not change the app's primary purpose or add features the reviewed build did not have. A wrapper that swaps its entire content remotely violates that, and it is also how apps get removed rather than merely rejected. Check what the update channel is actually allowed to replace, and note it.
+
+---
+
+## 13. After a rejection — the appeal
+
+A rejection is the start of a conversation, not a verdict, and **not replying is itself a common failure**. Many rejections — especially 4.3 (spam/template) and 2.1 (incomplete) — are reversed by a clear reply in Resolution Center, because the reviewer simply could not see what makes the app different or could not reach the feature.
+
+If the user arrives with a rejection already in hand, help them respond:
+
+- **Read the actual guideline number** they cited and address *that*, not the general topic. 4.3(b) is about design similarity; 4.3(a) is about duplicate apps. They need different answers.
+- **State the differentiator in one concrete sentence.** Not "our app is unique" — rather what it does that the comparable apps do not, in user terms.
+- **Give the reviewer a path.** Exact steps, a working demo account, region or hardware requirements, and a short screen recording if a feature is hard to reach.
+- **Attach evidence of the change** if a fix was made: what was changed, in which build number.
+- **Stay factual and brief.** Arguing about fairness does not help; the reviewer's job is to check a rule against a build.
+- If the rejection is genuinely wrong on the facts, an appeal to the App Review Board is available separately from the Resolution Center reply.
+
+Claude drafts the reply for the user to review and send — it does not submit anything. And if the app genuinely violates the guideline, say so plainly: the answer is to change the app, not to word the appeal more cleverly.
 
 ---
 
